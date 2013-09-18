@@ -1,12 +1,47 @@
 {-# LANGUAGE DeriveDataTypeable, DeriveGeneric #-}
 
-module Protocol where
+module Protocol (
+  ToServer(..),
+  ToClient(..),
+  ToPeer(..),
+  Username,
+  Message
+  ) where
 
 import GHC.Generics
 import Data.Typeable
 import Data.Serialize
 -- import Data.Word
 -- import qualified Network.Socket as S
+
+type HostName    = String
+type ServiceName = String
+type Addr        = (HostName, ServiceName)
+
+type Message  = String
+type Username = String
+
+data ToServer
+  = Login String {-- CR-someday: passwords. String --}
+  | GetAddr String
+  deriving (Typeable, Generic)
+
+data ToClient
+  = Friend String (Maybe Addr)
+  -- | Friends [(String, Addr)]
+  deriving (Typeable, Generic)
+
+data ToPeer
+  = Hail Username
+  | Message String
+  deriving (Typeable, Generic)
+
+instance Serialize ToServer where
+
+instance Serialize ToClient where
+
+instance Serialize ToPeer where
+
 {--
 newtype PortNumber = PortNum Word16
   deriving (Show, Generic)
@@ -45,27 +80,3 @@ fromSockAddr (S.SockAddrInet (S.PortNum p) addr)        = Inet (PortNum p) addr
 fromSockAddr (S.SockAddrInet6 (S.PortNum p) f addr sid) = Inet6 (PortNum p) f addr sid
 fromSockAddr (S.SockAddrUnix s)                         = Unix s
 --}
-
-type HostName    = String
-type ServiceName = String
-type Addr        = (HostName, ServiceName)
-
-data ToServer
-  = Login String {-- CR-someday: passwords. String --}
-  | GetAddr String
-  deriving (Typeable, Generic)
-
-data ToClient
-  = Friend String (Maybe Addr)
-  -- | Friends [(String, Addr)]
-  deriving (Typeable, Generic)
-
-data ToPeer
-  = Message String
-  deriving (Typeable, Generic)
-
-instance Serialize ToServer where
-
-instance Serialize ToClient where
-
-instance Serialize ToPeer where
