@@ -122,7 +122,6 @@ main = do
 
 server :: Output PORequest -> Effect
 server poRequestW = do
-
   serve HostAny "8080" $ \(sock, addr) -> do
   N.recv sock 4096 >>= bind decode .> maybe (return ()) $ \case
     Message _ -> error "Did not receive hail"

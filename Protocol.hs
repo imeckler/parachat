@@ -5,7 +5,8 @@ module Protocol (
   ToClient(..),
   ToPeer(..),
   Username,
-  Message
+  Message,
+  Addr
   ) where
 
 import GHC.Generics

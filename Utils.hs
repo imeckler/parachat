@@ -3,6 +3,9 @@ module Utils where
 eitherToMaybe :: Either a b -> Maybe b
 eitherToMaybe = either (const Nothing) Just
 
+may :: Maybe a -> b -> (a -> b) -> b
+may m def f = maybe def f m
+
 decorate :: (a -> b) -> a -> (a, b)
 decorate f x = (x, f x)
 
