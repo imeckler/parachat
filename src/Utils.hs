@@ -1,10 +1,22 @@
 module Utils where
 
+import Data.Maybe
+
+fromRight :: Either a b -> b
+fromRight (Right x) = x
+
+isRight :: Either a b -> Bool
+isRight (Right _) = True
+isRight _         = False
+
 eitherToMaybe :: Either a b -> Maybe b
 eitherToMaybe = either (const Nothing) Just
 
 may :: Maybe a -> b -> (a -> b) -> b
 may m def f = maybe def f m
+
+maybeRead :: (Read a) => String -> Maybe a
+maybeRead = fmap fst . listToMaybe . reads
 
 decorate :: (a -> b) -> a -> (a, b)
 decorate f x = (x, f x)

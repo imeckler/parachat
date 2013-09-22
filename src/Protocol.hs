@@ -25,17 +25,17 @@ type Username = String
 data ToServer
   = Login String {-- CR-someday: passwords. String --}
   | GetAddr String
-  deriving (Typeable, Generic)
+  deriving (Typeable, Generic, Show)
 
 data ToClient
   = Friend String (Maybe Addr)
   -- | Friends [(String, Addr)]
-  deriving (Typeable, Generic)
+  deriving (Typeable, Generic, Show)
 
 data ToPeer
   = Hail Username
   | Message String
-  deriving (Typeable, Generic)
+  deriving (Typeable, Generic, Show)
 
 instance Serialize ToServer where
 

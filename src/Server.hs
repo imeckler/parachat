@@ -1,21 +1,21 @@
 {-# LANGUAGE NoMonomorphismRestriction, LambdaCase #-}
-module Server where
+module Main where
 
 import Protocol
 import Utils
 -- import Pipes
-import System.IO (Handle)
-import qualified System.IO as IO
+-- import System.IO (Handle)
+-- import qualified System.IO as IO
 import Data.Serialize
-import qualified Data.ByteString as B
-import qualified Data.ByteString.Lazy as LB
+-- import qualified Data.ByteString as B
+-- import qualified Data.ByteString.Lazy as LB
 import Control.Concurrent.STM
 import qualified Data.Map as M
 import Data.Map (Map)
 import System.IO.Unsafe
 import Network.Socket hiding (bind)
 import qualified Network.Simple.TCP as NS
-import Control.Concurrent.Async
+-- import Control.Concurrent.Async
 import Control.Monad
 import Control.Applicative
 
@@ -53,7 +53,8 @@ main =
     forever $ do
       msgMay <- NS.recv sock 4096 >>| bind (decode .> eitherToMaybe)
       may msgMay (return ()) $ \case
-        Login user -> 
+        Login user -> do
+          print (Login user)
           sockAddrToAddr addr >>= 
             maybe (return ()) (atomically . addToDirectory user)
         GetAddr friend ->

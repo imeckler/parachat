@@ -1,30 +1,37 @@
 {-# LANGUAGE OverloadedStrings, RecordWildCards, TupleSections, LambdaCase #-}
-module Client2 where
+module Main where
 
 import Control.Applicative
 import Control.Monad
 import Control.Monad.State
 import Data.Maybe
+import System.Directory
+import System.Environment
 import Control.Concurrent.Async
 import Pipes
 import Pipes.Concurrent as PC
 import qualified Pipes.Prelude as P
 import Pipes.Network.TCP.Safe hiding (send, recv)
--- import qualified Data.ByteString as B
+import qualified Data.ByteString as B
 import Data.Serialize hiding (get)
--- import qualified Network.Socket as S
+import qualified Network.Socket as S
 import qualified Network.Simple.TCP as N
 import qualified Data.Map as M
--- import Data.Map (Map)
+import Data.Map (Map)
 import Control.Concurrent.STM
 import Protocol
 import Utils
+import Graphics.Vty.Widgets.All
+import qualified Data.Text as T
+import Data.Text (Text)
+import Reactive.Threepenny
+import Graphics.UI.Threepenny
 
 data UserInfo
   = UserInfo
   { username :: String
   , buddies  :: [String]
-  }
+  } deriving (Show, Read)
 
 data UserInput
   = Send Username Message
@@ -34,14 +41,14 @@ data ConvoState
   = Active
   | Connecting (TMVar Socket)
 
-serverHostName :: HostName
-serverHostName = "localhost"
+serverHostName :: IO HostName
+serverHostName = head <$> getArgs
 
-configPath :: FilePath
-configPath = "~/.pararc"
+configPath :: IO FilePath
+configPath = (++ "/.pararc") <$> getHomeDirectory
 
 readUserInfo :: String -> Maybe UserInfo
-readUserInfo = undefined
+readUserInfo = maybeRead
 
 getUserInput :: IO (Input UserInput)
 getUserInput = do
@@ -54,10 +61,12 @@ getUserInput = do
 may :: Maybe a -> b -> (a -> b) -> b
 may m def f = maybe def f m
 
+type POBox = (Output Text, Input Text)
+
 data PORequest
   = OpenPOBox Username 
   | LiveOne Username Socket
-  | SendReq Username Message
+--  | SendReq Username Message
 
 type SockMaker = Username -> IO (Maybe Socket)
 
@@ -66,7 +75,8 @@ maybeIOSwap = maybe (return Nothing) (fmap Just)
 
 sockMaker :: UserInfo -> IO SockMaker
 sockMaker (UserInfo {..}) = do
-  (serverSock, _) <- N.connectSock serverHostName "8080"
+  serverName <- serverHostName
+  (serverSock, _) <- N.connectSock serverName "8080"
   N.send serverSock (encode $ Login username)
   return $ getFromServer serverSock
 
@@ -81,33 +91,53 @@ sockMaker (UserInfo {..}) = do
         .> bind (\(Friend _name addrMay) -> newSock <$> addrMay)
         .> maybeIOSwap
 
-postmaster :: MonadIO m => (Username -> IO (Maybe Socket)) -> Consumer PORequest m ()
-postmaster makeSock = flip evalStateT M.empty . forever $
-  lift await >>= \case
-    LiveOne friend sock -> do
-      liftIO . forkIO . runEffect $ fromSocket sock 4096 >-> P.print
-      modify (M.insert friend sock)
 
-    OpenPOBox user -> do
-      isConnected <-
-        liftIO . maybe (return False) sIsConnected . M.lookup user <$> get
-      when (not isConnected) $
-        liftIO (makeSock user) >>= maybe (return ()) (modify . M.insert user)
+-- guiMaster :: IO (Username -> IO (Input Text))
+-- guiMaster = do
 
-    SendReq user msg ->
-      get >>= M.lookup user
-           .> maybe (return ()) (flip N.send (encode $ Message msg))
+poBoxMaker :: SockMaker -> Input PORequest -> IO (Async (), Input (Username, POBox))
+poBoxMaker makeSock reqs = do
+  (convoStreamW, convoStreamR) <- spawn Unbounded
+  a <- async . runEffect $ fromInput reqs >-> handleReqs convoStreamW
+  return (a, convoStreamR)
+  where
+    handleReqs convoStreamW = forever $
+      await >>= \case
+        LiveOne friend sock -> liftIO $
+          sockBoxes friend sock >>= 
+          (friend,) .> send convoStreamW .> atomically
 
+        OpenPOBox friend -> liftIO $
+          makeSock friend >>=
+            maybe (return True)
+              (sockBoxes friend >=> (friend,) .> send convoStreamW .> atomically)
+
+    extractMessage (Message m) = Right (T.pack m)
+    extractMessage _           = Left "Could not extract message"
+
+    sockBoxes friend sock = do
+      (inW, inR) <- spawn Unbounded
+      forkIO . runEffect $ fromSocket sock 4096
+        >-> P.map (decode >=> extractMessage)
+        >-> P.filter isRight >-> P.map fromRight
+        >-> toOutput inW
+
+      (outW, outR) <- spawn Unbounded
+      forkIO . runEffect $
+        fromInput outR >-> P.map (T.unpack .> Message .> encode) >-> toSocket sock
+      return (outW, inR)
+
+{--
 main :: IO ()
 main = do
-  userInfo  <- fromMaybe (error "Could not read config file") . readUserInfo <$> readFile configPath
+  userInfo  <- fromMaybe (error "Could not read config file") . readUserInfo <$> (readFile =<< configPath)
   userInput <- getUserInput
   makeSock  <- sockMaker userInfo
   (poRequestW, poRequestR) <- spawn Unbounded
   
-  mapM_ (wait . async . runEffect) $
-    [ fromInput userInput >-> forever (mkPORequests poRequestW)
-    , server poRequestW
+  mapM_ (runEffect .> async >=> wait)
+    [ server poRequestW
+    , fromInput userInput  >-> forever (mkPORequests poRequestW)
     , fromInput poRequestR >-> postmaster makeSock
     ]
 
@@ -118,16 +148,18 @@ main = do
       Send user msg <- await
       liftIO . atomically $ do
         send poRequestW (OpenPOBox user)
-        send poRequestW (SendReq user msg)
-
-server :: Output PORequest -> Effect
+        -- send poRequestW (SendReq user msg)
+--}
+server :: Output PORequest -> Effect IO ()
 server poRequestW = do
-  serve HostAny "8080" $ \(sock, addr) -> do
-  N.recv sock 4096 >>= bind decode .> maybe (return ()) $ \case
-    Message _ -> error "Did not receive hail"
-    Hail user -> 
-  forkIO . runEffect $ fromSocket sock >-> P.print
-
+  N.serve HostAny "8080" $ \(sock, _) -> do
+    N.recv sock 4096 >>= bind (decode .> eitherToMaybe) .> maybe (return ()) (handle sock)
+  where
+    handle _ (Message _) = error "Did not receive hail"
+    handle sock (Hail user) = do
+      print (Hail user)
+      atomically $ PC.send poRequestW (LiveOne user sock)
+      liftIO . runEffect $ fromSocket sock 4096 >-> P.print
 {--
 updateDirectory :: Consumer ToClient IO ()
 updateDirectory = do
