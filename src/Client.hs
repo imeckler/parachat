@@ -1,11 +1,10 @@
 {-# LANGUAGE OverloadedStrings, RecordWildCards, TupleSections, LambdaCase #-}
-module Main where
+module Client where
 
 import Control.Applicative
 import Control.Monad
 import Control.Monad.State
-import Data.Maybe
-import Data.Monoid
+-- import Data.Maybe
 import System.Directory
 import System.Environment
 import Control.Concurrent.Async
@@ -13,26 +12,16 @@ import Pipes
 import Pipes.Concurrent as PC
 import qualified Pipes.Prelude as P
 import Pipes.Network.TCP.Safe hiding (send, recv)
-import qualified Data.ByteString as B
+-- import qualified Data.ByteString as B
 import Data.Serialize hiding (get)
-import qualified Network.Socket as S
+-- import qualified Network.Socket as S
 import qualified Network.Simple.TCP as N
-import qualified Data.Map as M
-import Data.Map (Map)
+-- import qualified Data.Map as M
+-- import Data.Map (Map)
 import Control.Concurrent.STM
 
 import Protocol
 import Utils
-import Frp
-
-import Graphics.Vty.Widgets.All
-import qualified Data.Text as T
-import Data.Text (Text)
-import Reactive.Threepenny
-import qualified Graphics.UI.Threepenny as UI
-import Graphics.UI.Threepenny.Attributes
-import Graphics.UI.Threepenny.Event
-import Graphics.UI.Threepenny.Core
 
 data UserInfo
   = UserInfo
@@ -68,7 +57,7 @@ getUserInput = do
 may :: Maybe a -> b -> (a -> b) -> b
 may m def f = maybe def f m
 
-type POBox = (Output Text, Input Text)
+type POBox = (Output String, Input String)
 
 data PORequest
   = OpenPOBox Username 
@@ -111,18 +100,18 @@ poBoxMaker makeSock reqs = do
     handleReqs convoStreamW = forever $
       await >>= \case
         LiveOne friend sock -> liftIO $
-          sockBoxes friend sock >>= 
+          sockBoxes sock >>= 
           (friend,) .> send convoStreamW .> atomically
 
         OpenPOBox friend -> liftIO $
           makeSock friend >>=
             maybe (return True)
-              (sockBoxes friend >=> (friend,) .> send convoStreamW .> atomically)
+              (sockBoxes >=> (friend,) .> send convoStreamW .> atomically)
 
-    extractMessage (Message m) = Right (T.pack m)
+    extractMessage (Message m) = Right m
     extractMessage _           = Left "Could not extract message"
 
-    sockBoxes friend sock = do
+    sockBoxes sock = do
       (inW, inR) <- spawn Unbounded
       forkIO . runEffect $ fromSocket sock 4096
         >-> P.map (decode >=> extractMessage)
@@ -131,23 +120,8 @@ poBoxMaker makeSock reqs = do
 
       (outW, outR) <- spawn Unbounded
       forkIO . runEffect $
-        fromInput outR >-> P.map (T.unpack .> Message .> encode) >-> toSocket sock
+        fromInput outR >-> P.map (Message .> encode) >-> toSocket sock
       return (outW, inR)
-
-mkNewChatEntry :: IO (Element, Event String)
-mkNewChatEntry = do
-  newChatEntry <- UI.input # set type_ "text"
-  filterE (== 13) (keyDown newChatEntry)
-    |> fmap (const ())
-    |> mappend (blur newChatEntry) 
-    |> unsafeMapIO (const $ get value newChatEntry)
-
-setupGUI :: Window -> IO ()
-setupGUI window = do
-  pure window # set UI.title "Parachat"
-
-
-  let bod = getBody window
 
 
 {--

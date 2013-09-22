@@ -22,4 +22,5 @@ inputToEvent inp = do
   forkIO . runEffect $ fromInput inp >-> forever (await >>= liftIO . trigger)
   return evt
 
+type Trigger a = Handler a
 
