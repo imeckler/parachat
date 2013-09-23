@@ -23,6 +23,7 @@ import Reactive.Threepenny
 
 import Protocol
 import Utils
+import Frp
 
 data UserInfo
   = UserInfo
@@ -54,9 +55,6 @@ getUserInput = do
   u <- getLine
   forkIO (forever $ atomically . PC.send writer . Send u =<< getLine)
   return reader
-
-may :: Maybe a -> b -> (a -> b) -> b
-may m def f = maybe def f m
 
 type POBox = (Output String, Input String)
 
@@ -91,6 +89,15 @@ sockMaker (UserInfo {..}) = do
         .> bind (\(Friend _name addrMay) -> newSock <$> addrMay)
         .> maybeIOSwap
 
+toPeer :: Serialize a => Socket -> Event a -> IO (IO ())
+toPeer sock = flip register (encode .> N.send sock)
+
+fromPeer :: Serialize a => Socket -> IO (Event a)
+fromPeer sock = producerToEvent $
+  fromSocket sock 4096
+  >-> P.map decode
+  >-> forever (await >>= either (\_ -> pure ()) yield)
+
 {--
 poBoxMaker :: SockMaker -> Input PORequest -> IO (Async (), Input (Username, POBox))
 poBoxMaker makeSock reqs = do
@@ -122,6 +129,7 @@ poBoxMaker makeSock reqs = do
       return (outW, inR)
 --}
 
+{--
 fromPeer :: Socket -> Producer ToPeer IO ()
 fromPeer sock =
   fromSocket sock 4096
@@ -130,6 +138,7 @@ fromPeer sock =
 
 toPeer :: Socket -> Consumer ToPeer IO ()
 toPeer sock = forever (await >>= encode .> yield) >-> toSocket sock
+--}
 
 {--
 main :: IO ()
@@ -155,8 +164,8 @@ main = do
         -- send poRequestW (SendReq user msg)
 --}
 
-server' :: IO (Event (Username, Socket))
-server' = do
+server :: IO (Event (Username, Socket))
+server = do
   (evt, trigger) <- newEvent
   let handle _ (Message _)    = error "Did not receive hail"
       handle sock (Hail user) = trigger (user, sock)

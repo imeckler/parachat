@@ -35,6 +35,9 @@ producerToEvent p = do
   forkIO . runEffect $ p >-> forever (await >>= liftIO . trigger)
   return evt
 
+eventToProducer :: MonadIO m => Event a -> IO (Producer a m ())
+eventToProducer = fmap fromInput . eventToInput
+
 scan :: b -> (b -> a -> b) -> Event a -> IO (Behavior b)
 scan z f es = accumB z (fmap (flip f) es)
 

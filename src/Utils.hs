@@ -2,6 +2,9 @@ module Utils where
 
 import Data.Maybe
 
+ignoreM :: Monad m => m a -> m ()
+ignoreM = (>> return ())
+
 fromRight :: Either a b -> b
 fromRight (Right x) = x
 
@@ -35,3 +38,7 @@ infixl 1 >>|
 
 bind :: Monad m => (a -> m b) -> m a -> m b
 bind = flip (>>=)
+
+boolElim :: a -> a -> Bool -> a
+boolElim t f b = if b then t else f
+

@@ -10,11 +10,14 @@ import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Attributes
 import Graphics.UI.Threepenny.Events
 import Graphics.UI.Threepenny.Core
-import Data.Monoid
 -- import Control.Applicative
 
 import qualified Data.Map as M
 import Data.Map (Map)
+import Data.Monoid
+import Data.Maybe
+import Data.Thyme
+import qualified Network.Socket as S
 import Network.Socket (Socket)
 import Data.IORef
 
@@ -28,12 +31,6 @@ data ChatUI =
          , sinkMessages :: Event (UTCTime, String) -> IO (IO ())
          , closes       :: Event ()
          }
-
-setupGUI :: Window -> IO ()
-setupGUI window = do
-  pure window # set UI.title "Parachat"
-  let bod = getBody window
-  return ()
 
 getValueAndClear :: Element -> IO String
 getValueAndClear elt = get value elt <* set value "" (pure elt)
@@ -50,27 +47,6 @@ mkNewChatEntry = do
   return (newChatEntry, entries)
 
 data ChatAction = NewChat Username | FromFriend POBox
-
-removable :: (a -> IO Element)
-          -> (Element -> Event ())
-          -> Event a
-          -> Element
-          -> IO (Behavior [(a, Element)])
-removable mkElem mkRemovals adds container = do
-  idx                <- newIORef (0 :: Int)
-  (changes, trigger) <- newEvent
-  register adds $ \x -> do
-    i   <- readIORef idx
-    elt <- mkElem x
-    modifyIORef idx (+ 1)
-    trigger (M.insert i (x, elt))
-    pure container #+ [pure elt]
-    register (mkRemovals elt) $ \() -> do
-      delete elt
-      trigger (M.delete i)
-    return ()
-
-  fmap M.elems <$> accumB M.empty changes
 
 mkChatBox :: Username -> IO ChatUI -- (Element, Event String, Trigger String)
 mkChatBox buddyName = do
@@ -99,7 +75,7 @@ mkChatBox buddyName = do
 -- The argument is incoming chats, from the listener-server
 
 data PORequest
-  = HookItUp (Maybe Sock) ChatUI
+  = HookItUp (Maybe Socket) ChatUI
   | Close Username
 
 -- The Event returned is ChatUI's that need to be hooked up to sockets
@@ -108,26 +84,83 @@ mkChatArea :: Event (Username, Socket)
            -> IO (Event PORequest) 
 mkChatArea incoming container = do
   (newChatEntry, entries) <- mkNewChatEntry
+  pure container #+ [pure newChatEntry]
   let requestedUIs   = unsafeMapIO mkChatBox entries
       incomingPOReqs = unsafeMapIO (\(u, s) -> HookItUp (Just s) <$> mkChatBox u) incoming
       -- consider getting rid of this
       incomingUIs    = fmap (\(HookItUp _ ui) -> ui) incomingPOReqs
 
-  register (unions [requestedUIs, incomingUIs]) ((container #+) . map _elt)
+  register (unions [requestedUIs, incomingUIs])
+           (ignoreM . (pure container #+) . map (pure . _elt))
 
   removals <- bindS requestedUIs $ \(ChatUI {..}) -> fmap (const buddyName) closes
   return (fmap (HookItUp Nothing) requestedUIs <> incomingPOReqs <> fmap Close removals)
 
 postmaster :: SockMaker -> Event PORequest -> IO ()
 postmaster makeSock reqs = do
+  socks <- newIORef M.empty
+  let makeSock' u  = do 
+        sockMay <- makeSock u
+        maybe (pure ()) (modifyIORef socks . M.insert u) sockMay
+        return sockMay
+
+      obtainSock u = do
+        sockMay <- M.lookup u <$> readIORef socks
+        case sockMay of
+          Nothing -> makeSock' u
+          Just s  -> S.isConnected s >>= boolElim (return (Just s)) (makeSock' u)
+
   register reqs $ \case
     HookItUp sockMay (ChatUI {..}) -> do
-      sockMay' <- maybe (makeSock buddyName) (return . Just) sockMay
-      may sockMay' (return ()) $ \sock ->
-        sinkMessages . producerToEvent $ P.map  fromSocket sock 4096
+      sockMay' <- maybe (obtainSock buddyName) (return . Just) sockMay
+      may sockMay' (return ()) $ \sock -> ignoreM $ do
+        fromPeer sock >>= sinkMessages
+        toPeer sock sentMessages
+
+    Close u -> do
+      (sockMay, socks') <- M.updateLookupWithKey (\_ _ -> Nothing) u <$> readIORef socks
+      maybe (pure ()) S.close sockMay
+      writeIORef socks socks'
+
+  return ()
+
 
 main :: IO ()
-main = return (){-- do
-  (newChatEntry, entries) <- mkNewChatEntry
-  (friend, --}
+main = do
+  userInfo <- fromMaybe (error "Could not read config file") . readUserInfo <$> (readFile =<< configPath)
+  startGUI defaultConfig (setupGUI userInfo)
+
+setupGUI :: UserInfo -> Window -> IO ()
+setupGUI userInfo window = do
+  pure window # set UI.title "Parachat"
+  incoming <- server
+  makeSock <- sockMaker userInfo
+
+  chatContainer <- UI.div # set class_ "chatContainer"
+  getBody window #+ [pure chatContainer]
+
+  poRequests <- mkChatArea incoming chatContainer
+  postmaster makeSock poRequests
+
+removable :: (a -> IO Element)
+          -> (Element -> Event ())
+          -> Event a
+          -> Element
+          -> IO (Behavior [(a, Element)])
+removable mkElem mkRemovals adds container = do
+  idx                <- newIORef (0 :: Int)
+  (changes, trigger) <- newEvent
+  register adds $ \x -> do
+    i   <- readIORef idx
+    elt <- mkElem x
+    modifyIORef idx (+ 1)
+    trigger (M.insert i (x, elt))
+    pure container #+ [pure elt]
+    register (mkRemovals elt) $ \() -> do
+      delete elt
+      trigger (M.delete i)
+    return ()
+
+  fmap M.elems <$> accumB M.empty changes
+
 

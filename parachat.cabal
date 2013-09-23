@@ -16,7 +16,7 @@ Executable parachat
                           cereal >= 0.3, stm >= 2.4, async >= 2,
                           network-simple >= 0.3, network >= 2.4, mtl >= 2.1,
                           vty-ui >= 1.6, reactive-banana >= 0.7, text >= 0.11,
-                          bytestring >= 0.10, threepenny-gui >=0.3, thyme >= 1.4
+                          bytestring >= 0.10, threepenny-gui >=0.3, thyme >= 0.3
 
 Executable server
            Main-is: Server.hs
