@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable, DeriveGeneric #-}
+{-# LANGUAGE DeriveDataTypeable, DeriveGeneric, StandaloneDeriving #-}
 
 module Protocol (
   ToServer(..),
@@ -12,8 +12,16 @@ module Protocol (
 import GHC.Generics
 import Data.Typeable
 import Data.Serialize
+import Data.Thyme
+import Data.Int
+import Unsafe.Coerce
+
 -- import Data.Word
 -- import qualified Network.Socket as S
+
+instance Serialize UTCTime where
+  put t = put (unsafeCoerce t :: Int64)
+  get = fmap (unsafeCoerce :: Int64 -> UTCTime) get
 
 type HostName    = String
 type ServiceName = String
@@ -34,8 +42,8 @@ data ToClient
 
 data ToPeer
   = Hail Username
-  | Message String
-  deriving (Typeable, Generic, Show)
+  | Message (UTCTime, String)
+  deriving (Typeable, Generic)
 
 instance Serialize ToServer where
 

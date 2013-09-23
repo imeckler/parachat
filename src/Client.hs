@@ -3,11 +3,11 @@ module Client where
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.State
+-- import Control.Monad.State
 -- import Data.Maybe
 import System.Directory
 import System.Environment
-import Control.Concurrent.Async
+-- import Control.Concurrent.Async
 import Pipes
 import Pipes.Concurrent as PC
 import qualified Pipes.Prelude as P
@@ -19,6 +19,7 @@ import qualified Network.Simple.TCP as N
 -- import qualified Data.Map as M
 -- import Data.Map (Map)
 import Control.Concurrent.STM
+import Reactive.Threepenny
 
 import Protocol
 import Utils
@@ -77,7 +78,10 @@ sockMaker (UserInfo {..}) = do
   return $ getFromServer serverSock
 
   where
-    newSock (host, port) = fst <$> connectSock host port
+    newSock (host, port) = do
+      (sock, _addr) <- connectSock host port
+      N.send sock . encode $ Hail username
+      return sock
 
     getFromServer :: Socket -> Username -> IO (Maybe Socket)
     getFromServer serverSock friend = do
@@ -87,10 +91,7 @@ sockMaker (UserInfo {..}) = do
         .> bind (\(Friend _name addrMay) -> newSock <$> addrMay)
         .> maybeIOSwap
 
-
--- guiMaster :: IO (Username -> IO (Input Text))
--- guiMaster = do
-
+{--
 poBoxMaker :: SockMaker -> Input PORequest -> IO (Async (), Input (Username, POBox))
 poBoxMaker makeSock reqs = do
   (convoStreamW, convoStreamR) <- spawn Unbounded
@@ -108,9 +109,6 @@ poBoxMaker makeSock reqs = do
             maybe (return True)
               (sockBoxes >=> (friend,) .> send convoStreamW .> atomically)
 
-    extractMessage (Message m) = Right m
-    extractMessage _           = Left "Could not extract message"
-
     sockBoxes sock = do
       (inW, inR) <- spawn Unbounded
       forkIO . runEffect $ fromSocket sock 4096
@@ -122,7 +120,16 @@ poBoxMaker makeSock reqs = do
       forkIO . runEffect $
         fromInput outR >-> P.map (Message .> encode) >-> toSocket sock
       return (outW, inR)
+--}
 
+fromPeer :: Socket -> Producer ToPeer IO ()
+fromPeer sock =
+  fromSocket sock 4096
+  >-> P.map decode
+  >-> forever (await >>= either (const $ return ()) yield)
+
+toPeer :: Socket -> Consumer ToPeer IO ()
+toPeer sock = forever (await >>= encode .> yield) >-> toSocket sock
 
 {--
 main :: IO ()
@@ -147,6 +154,17 @@ main = do
         send poRequestW (OpenPOBox user)
         -- send poRequestW (SendReq user msg)
 --}
+
+server' :: IO (Event (Username, Socket))
+server' = do
+  (evt, trigger) <- newEvent
+  let handle _ (Message _)    = error "Did not receive hail"
+      handle sock (Hail user) = trigger (user, sock)
+  N.serve HostAny "8080" $ \(sock, _) ->
+    N.recv sock 4096 >>= bind (decode .> eitherToMaybe) .> maybe (return ()) (handle sock)
+  return evt
+
+{--
 server :: Output PORequest -> Effect IO ()
 server poRequestW = do
   N.serve HostAny "8080" $ \(sock, _) -> do
@@ -157,6 +175,7 @@ server poRequestW = do
       print (Hail user)
       atomically $ PC.send poRequestW (LiveOne user sock)
       liftIO . runEffect $ fromSocket sock 4096 >-> P.print
+--}
 {--
 updateDirectory :: Consumer ToClient IO ()
 updateDirectory = do

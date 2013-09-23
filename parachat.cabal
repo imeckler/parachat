@@ -1,0 +1,28 @@
+Name : parachat
+Version : 0.1
+Author: Izaak Meckler
+Maintainer: Izaak Meckler <meckler@uchicago.edu>
+Build-type: Simple
+Cabal-version: >= 1.2
+
+Stability: Alpha
+
+Executable parachat
+           Main-is: ClientUI.hs
+           hs-source-dirs: src
+           Other-modules: Utils, Frp, Client
+           Build-depends: base>=4 && <5, containers, pipes>=4, directory >= 1.2,
+                          pipes-concurrency >=2, pipes-network>=0.6,
+                          cereal >= 0.3, stm >= 2.4, async >= 2,
+                          network-simple >= 0.3, network >= 2.4, mtl >= 2.1,
+                          vty-ui >= 1.6, reactive-banana >= 0.7, text >= 0.11,
+                          bytestring >= 0.10, threepenny-gui >=0.3, thyme >= 1.4
+
+Executable server
+           Main-is: Server.hs
+           hs-source-dirs: src
+           Other-modules: Utils
+           Build-depends: base>=4 && <5, containers,
+                          cereal >= 0.3, stm >= 2.4,
+                          network-simple >= 0.3, network >= 2.4
+
