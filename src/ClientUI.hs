@@ -38,9 +38,9 @@ getValueAndClear elt = get value elt <* set value "" (pure elt)
 mkNewChatEntry :: IO (Element, Event Username)
 mkNewChatEntry = do
   newChatEntry <- UI.input # set type_ "text"
-  let entries =  filterE (== 13) (keydown newChatEntry)
-              |> unsafeMapIO (\_ -> getValueAndClear newChatEntry)
-              |> filterE (not . null)
+  entries <- filterE (== 13) (keydown newChatEntry)
+             |> mapIO (\_ -> getValueAndClear newChatEntry)
+             |> fmap (filterE (not . null))
 
   return (newChatEntry, entries)
 
@@ -57,14 +57,14 @@ mkChatBox buddyName = do
 
   let closes = click closeButton
   register closes $ \_ -> delete container
+  sentMessages <- mapIO (\_ -> (,) <$> getCurrentTime <*> getValueAndClear msgInput)
+                $ filterE (== 13) (keydown msgInput)
 
   return $ ChatUI
     { buddyName
     , _elt         = container
-    , sentMessages =
-        unsafeMapIO (\_ -> (,) <$> getCurrentTime <*> getValueAndClear msgInput)
-        $ filterE (== 13) (keydown msgInput)
     , sinkMessages = \ms -> register ms (\m -> () <$ pure messages #+ [mkMessageElt m])
+    , sentMessages
     , closes
     }
 
@@ -83,17 +83,22 @@ mkChatArea :: Event (Username, Socket)
 mkChatArea incoming container = do
   (newChatEntry, entries) <- mkNewChatEntry
   pure container #+ [pure newChatEntry]
-  let requestedUIs   = unsafeMapIO (\x -> putStrLn "requestedUI" >> mkChatBox x) entries
-      incomingPOReqs = unsafeMapIO (\(u, s) -> HookItUp (Just s) <$> mkChatBox u) incoming
-      -- consider getting rid of this
-      incomingUIs    = fmap (\(HookItUp _ ui) -> ui) incomingPOReqs
+
+  requestedUIs   <- mapIO mkChatBox entries
+  incomingPOReqs <- mapIO (\(u, s) -> HookItUp (Just s) <$> mkChatBox u) incoming
+  -- consider getting rid of this
+  let incomingUIs = fmap (\(HookItUp _ ui) -> ui) incomingPOReqs
 
   register (unions [requestedUIs, incomingUIs])
            (ignoreM . (pure container #+) . map (pure . _elt))
 
   removals <- bindS requestedUIs $ \(ChatUI {..}) -> fmap (const buddyName) closes
 
-  let res = fmap (HookItUp Nothing) requestedUIs <> incomingPOReqs <> fmap Close removals
+  register removals (const $ print "removal yo")
+
+  let res =  fmap (HookItUp Nothing) requestedUIs
+          <> incomingPOReqs
+          <> fmap Close removals
   return res
 
 postmaster :: SockMaker -> Event PORequest -> IO ()
@@ -101,9 +106,10 @@ postmaster makeSock reqs = do
   putStrLn "Postmaster"
   socks <- newIORef M.empty
   let makeSock' u  = do 
+        putStrLn "bout to call makeSock"
         sockMay <- makeSock u
         maybe (pure ()) (modifyIORef socks . M.insert u) sockMay
-        putStrLn "makeSock'"
+        putStrLn "made sock"
         return sockMay
 
       obtainSock u = do
@@ -142,7 +148,6 @@ setupGUI userInfo window = do
   pure window # set UI.title "Parachat"
   incoming <- mkIncoming
   makeSock <- sockMaker userInfo
-  putStrLn "Made it through sockMaker"
 
   uberContainer <- UI.div # set class_ "app"
   getBody window #+ [pure uberContainer]

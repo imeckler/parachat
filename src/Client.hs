@@ -39,11 +39,6 @@ data ConvoState
   = Active
   | Connecting (TMVar Socket)
 
-{--
-serverHostName :: IO HostName
-serverHostName = head <$> getArgs
---}
-
 configPath :: IO FilePath
 configPath = (++ "/.pararc") <$> getHomeDirectory
 
@@ -69,8 +64,9 @@ sockMaker (UserInfo {..}) = do
   return $ getFromServer serverSock
 
   where
-    newSock (host, port) = do
-      (sock, _addr) <- connectSock host port
+    newSock host = do
+      putStrLn "newSock"
+      (sock, _addr) <- connectSock host clientPort
       N.send sock . encode $ Hail username
       return sock
 
@@ -79,7 +75,7 @@ sockMaker (UserInfo {..}) = do
       N.send serverSock . encode $ GetAddr friend
       N.recv serverSock 4096 >>=
         bind (decode .> eitherToMaybe)
-        .> bind (\(Friend _name addrMay) -> newSock <$> addrMay)
+        .> bind (\(Friend _name addrMay) -> newSock . fst <$> addrMay)
         .> maybeIOSwap
 
 toPeer :: Serialize a => Socket -> Event a -> IO (IO ())
@@ -91,115 +87,16 @@ fromPeer sock = producerToEvent $
   >-> P.map decode
   >-> forever (await >>= either (\_ -> pure ()) yield)
 
-{--
-poBoxMaker :: SockMaker -> Input PORequest -> IO (Async (), Input (Username, POBox))
-poBoxMaker makeSock reqs = do
-  (convoStreamW, convoStreamR) <- spawn Unbounded
-  a <- async . runEffect $ fromInput reqs >-> handleReqs convoStreamW
-  return (a, convoStreamR)
-  where
-    handleReqs convoStreamW = forever $
-      await >>= \case
-        LiveOne friend sock -> liftIO $
-          sockBoxes sock >>= 
-          (friend,) .> send convoStreamW .> atomically
-
-        OpenPOBox friend -> liftIO $
-          makeSock friend >>=
-            maybe (return True)
-              (sockBoxes >=> (friend,) .> send convoStreamW .> atomically)
-
-    sockBoxes sock = do
-      (inW, inR) <- spawn Unbounded
-      forkIO . runEffect $ fromSocket sock 4096
-        >-> P.map (decode >=> extractMessage)
-        >-> P.filter isRight >-> P.map fromRight
-        >-> toOutput inW
-
-      (outW, outR) <- spawn Unbounded
-      forkIO . runEffect $
-        fromInput outR >-> P.map (Message .> encode) >-> toSocket sock
-      return (outW, inR)
---}
-
-{--
-fromPeer :: Socket -> Producer ToPeer IO ()
-fromPeer sock =
-  fromSocket sock 4096
-  >-> P.map decode
-  >-> forever (await >>= either (const $ return ()) yield)
-
-toPeer :: Socket -> Consumer ToPeer IO ()
-toPeer sock = forever (await >>= encode .> yield) >-> toSocket sock
---}
-
-{--
-main :: IO ()
-main = do
-  userInfo  <- fromMaybe (error "Could not read config file") . readUserInfo <$> (readFile =<< configPath)
-  userInput <- getUserInput
-  makeSock  <- sockMaker userInfo
-  (poRequestW, poRequestR) <- spawn Unbounded
-  
-  mapM_ (runEffect .> async >=> wait)
-    [ server poRequestW
-    , fromInput userInput  >-> forever (mkPORequests poRequestW)
-    , fromInput poRequestR >-> postmaster makeSock
-    ]
-
-  return ()
-
-  where
-    mkPORequests poRequestW = forever $ do
-      Send user msg <- await
-      liftIO . atomically $ do
-        send poRequestW (OpenPOBox user)
-        -- send poRequestW (SendReq user msg)
---}
+clientPort :: ServiceName
+clientPort = "8081"
 
 mkIncoming :: IO (Event (Username, Socket))
 mkIncoming = do
   (evt, trigger) <- newEvent
   let handle _    (Message _) = error "Did not receive hail"
       handle sock (Hail user) = trigger (user, sock)
-  forkIO . N.serve HostAny "8080" $ \(sock, _) ->
+  forkIO . N.serve HostAny clientPort $ \(sock, _) ->
     N.recv sock 4096 >>= bind (decode .> eitherToMaybe) .> maybe (return ()) (handle sock)
   return evt
 
-{--
-server :: Output PORequest -> Effect IO ()
-server poRequestW = do
-  N.serve HostAny "8080" $ \(sock, _) -> do
-    N.recv sock 4096 >>= bind (decode .> eitherToMaybe) .> maybe (return ()) (handle sock)
-  where
-    handle _ (Message _) = error "Did not receive hail"
-    handle sock (Hail user) = do
-      print (Hail user)
-      atomically $ PC.send poRequestW (LiveOne user sock)
-      liftIO . runEffect $ fromSocket sock 4096 >-> P.print
---}
 
-{--
-updateDirectory :: Consumer ToClient IO ()
-updateDirectory = do
-  Friend name addrMay <- await
-  may addrMay (liftIO . putStrLn $ "User " ++ name ++ " not found") $ \addr -> do
-    dir <- liftIO . atomically $ readTVar directory
-
-    case M.lookup name dir of
-         Just Active         -> return ()
-         Just (Connecting _) -> return ()
-         Nothing -> do
-
-    (outbox, inbox) <- spawn
-    forkIO $ fromInput inbox >-> P.print
-
-    openConnectionToUser name
-
-dispatch :: UserInput -> IO ()
-dispatch (Send friend msg) = do
-  sockBox <- newEmptyTMVarIO
-  getSock sockBox
-
-directory :: TVar (Map Username ConvoState)
---}

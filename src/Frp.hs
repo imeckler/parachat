@@ -38,6 +38,15 @@ producerToEvent p = do
 eventToProducer :: MonadIO m => Event a -> IO (Producer a m ())
 eventToProducer = fmap fromInput . eventToInput
 
+mapIO :: (a -> IO b) -> Event a -> IO (Event b)
+mapIO f e = do
+  (evt, trigger)   <- newEvent
+  (writer, reader) <- spawn Unbounded
+  register e ((() <$) . atomically . send writer)
+  forkIO . runEffect $
+    fromInput reader >-> forever (await >>= liftIO . (f >=> trigger))
+  return evt
+
 scan :: b -> (b -> a -> b) -> Event a -> IO (Behavior b)
 scan z f es = accumB z (fmap (flip f) es)
 
