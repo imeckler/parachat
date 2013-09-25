@@ -27,8 +27,8 @@ import Frp
 
 data UserInfo
   = UserInfo
-  { username :: String
-  , buddies  :: [String]
+  { username :: Username
+  , buddies  :: [Username]
   } deriving (Show, Read)
 
 data UserInput
@@ -39,22 +39,16 @@ data ConvoState
   = Active
   | Connecting (TMVar Socket)
 
+{--
 serverHostName :: IO HostName
 serverHostName = head <$> getArgs
+--}
 
 configPath :: IO FilePath
 configPath = (++ "/.pararc") <$> getHomeDirectory
 
 readUserInfo :: String -> Maybe UserInfo
 readUserInfo = maybeRead
-
-getUserInput :: IO (Input UserInput)
-getUserInput = do
-  (writer, reader) <- spawn Unbounded
-  putStrLn "Who you wanna talk to"
-  u <- getLine
-  forkIO (forever $ atomically . PC.send writer . Send u =<< getLine)
-  return reader
 
 type POBox = (Output String, Input String)
 
@@ -70,8 +64,7 @@ maybeIOSwap = maybe (return Nothing) (fmap Just)
 
 sockMaker :: UserInfo -> IO SockMaker
 sockMaker (UserInfo {..}) = do
-  serverName <- serverHostName
-  (serverSock, _) <- N.connectSock serverName "8080"
+  (serverSock, _) <- N.connectSock serverName serverPort
   N.send serverSock (encode $ Login username)
   return $ getFromServer serverSock
 
@@ -164,12 +157,12 @@ main = do
         -- send poRequestW (SendReq user msg)
 --}
 
-server :: IO (Event (Username, Socket))
-server = do
+mkIncoming :: IO (Event (Username, Socket))
+mkIncoming = do
   (evt, trigger) <- newEvent
-  let handle _ (Message _)    = error "Did not receive hail"
+  let handle _    (Message _) = error "Did not receive hail"
       handle sock (Hail user) = trigger (user, sock)
-  N.serve HostAny "8080" $ \(sock, _) ->
+  forkIO . N.serve HostAny "8080" $ \(sock, _) ->
     N.recv sock 4096 >>= bind (decode .> eitherToMaybe) .> maybe (return ()) (handle sock)
   return evt
 
@@ -185,6 +178,7 @@ server poRequestW = do
       atomically $ PC.send poRequestW (LiveOne user sock)
       liftIO . runEffect $ fromSocket sock 4096 >-> P.print
 --}
+
 {--
 updateDirectory :: Consumer ToClient IO ()
 updateDirectory = do

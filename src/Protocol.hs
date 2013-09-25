@@ -6,7 +6,10 @@ module Protocol (
   ToPeer(..),
   Username,
   Message,
-  Addr
+  Addr,
+  -- TODO: Delete
+  serverName,
+  serverPort
   ) where
 
 import GHC.Generics
@@ -50,6 +53,11 @@ instance Serialize ToServer where
 instance Serialize ToClient where
 
 instance Serialize ToPeer where
+
+-- Delete me:
+serverName = "0.0.0.0"
+serverPort = "8080"
+
 
 {--
 newtype PortNumber = PortNum Word16

@@ -39,8 +39,6 @@ mkNewChatEntry :: IO (Element, Event Username)
 mkNewChatEntry = do
   newChatEntry <- UI.input # set type_ "text"
   let entries =  filterE (== 13) (keydown newChatEntry)
-              |> fmap (const ())
-              |> mappend (blur newChatEntry) 
               |> unsafeMapIO (\_ -> getValueAndClear newChatEntry)
               |> filterE (not . null)
 
@@ -65,7 +63,7 @@ mkChatBox buddyName = do
     , _elt         = container
     , sentMessages =
         unsafeMapIO (\_ -> (,) <$> getCurrentTime <*> getValueAndClear msgInput)
-        $ filterE (== 13) (keydown msgInput) 
+        $ filterE (== 13) (keydown msgInput)
     , sinkMessages = \ms -> register ms (\m -> () <$ pure messages #+ [mkMessageElt m])
     , closes
     }
@@ -85,7 +83,7 @@ mkChatArea :: Event (Username, Socket)
 mkChatArea incoming container = do
   (newChatEntry, entries) <- mkNewChatEntry
   pure container #+ [pure newChatEntry]
-  let requestedUIs   = unsafeMapIO mkChatBox entries
+  let requestedUIs   = unsafeMapIO (\x -> putStrLn "requestedUI" >> mkChatBox x) entries
       incomingPOReqs = unsafeMapIO (\(u, s) -> HookItUp (Just s) <$> mkChatBox u) incoming
       -- consider getting rid of this
       incomingUIs    = fmap (\(HookItUp _ ui) -> ui) incomingPOReqs
@@ -94,17 +92,22 @@ mkChatArea incoming container = do
            (ignoreM . (pure container #+) . map (pure . _elt))
 
   removals <- bindS requestedUIs $ \(ChatUI {..}) -> fmap (const buddyName) closes
-  return (fmap (HookItUp Nothing) requestedUIs <> incomingPOReqs <> fmap Close removals)
+
+  let res = fmap (HookItUp Nothing) requestedUIs <> incomingPOReqs <> fmap Close removals
+  return res
 
 postmaster :: SockMaker -> Event PORequest -> IO ()
 postmaster makeSock reqs = do
+  putStrLn "Postmaster"
   socks <- newIORef M.empty
   let makeSock' u  = do 
         sockMay <- makeSock u
         maybe (pure ()) (modifyIORef socks . M.insert u) sockMay
+        putStrLn "makeSock'"
         return sockMay
 
       obtainSock u = do
+        putStrLn $ "trying to obtain a sock for " ++ u
         sockMay <- M.lookup u <$> readIORef socks
         case sockMay of
           Nothing -> makeSock' u
@@ -112,12 +115,15 @@ postmaster makeSock reqs = do
 
   register reqs $ \case
     HookItUp sockMay (ChatUI {..}) -> do
+      putStrLn "Hooking it up"
       sockMay' <- maybe (obtainSock buddyName) (return . Just) sockMay
       may sockMay' (return ()) $ \sock -> ignoreM $ do
+        print "lolz"
         fromPeer sock >>= sinkMessages
         toPeer sock sentMessages
 
     Close u -> do
+      putStrLn "Closin"
       (sockMay, socks') <- M.updateLookupWithKey (\_ _ -> Nothing) u <$> readIORef socks
       maybe (pure ()) S.close sockMay
       writeIORef socks socks'
@@ -127,21 +133,28 @@ postmaster makeSock reqs = do
 
 main :: IO ()
 main = do
-  userInfo <- fromMaybe (error "Could not read config file") . readUserInfo <$> (readFile =<< configPath)
+  userInfo <- fromMaybe (error "Could not read config file") .
+              readUserInfo <$> (readFile =<< configPath)
   startGUI defaultConfig (setupGUI userInfo)
 
 setupGUI :: UserInfo -> Window -> IO ()
 setupGUI userInfo window = do
   pure window # set UI.title "Parachat"
-  incoming <- server
+  incoming <- mkIncoming
   makeSock <- sockMaker userInfo
+  putStrLn "Made it through sockMaker"
 
-  chatContainer <- UI.div # set class_ "chatContainer"
-  getBody window #+ [pure chatContainer]
+  uberContainer <- UI.div # set class_ "app"
+  getBody window #+ [pure uberContainer]
 
-  poRequests <- mkChatArea incoming chatContainer
+  poRequests <- mkChatArea incoming uberContainer
+
+  -- DEBUG
+  register poRequests (\_ -> print "Never gonna see this")
+
   postmaster makeSock poRequests
 
+{--
 removable :: (a -> IO Element)
           -> (Element -> Event ())
           -> Event a
@@ -163,4 +176,4 @@ removable mkElem mkRemovals adds container = do
 
   fmap M.elems <$> accumB M.empty changes
 
-
+--}
