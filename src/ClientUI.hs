@@ -94,6 +94,7 @@ mkChatArea incoming container = do
 
   removals <- bindS requestedUIs $ \(ChatUI {..}) -> fmap (const buddyName) closes
 
+  register incoming (\(u, s) -> putStrLn $ "incoming: " ++ u)
   register removals (const $ print "removal yo")
 
   let res =  fmap (HookItUp Nothing) requestedUIs
@@ -155,7 +156,6 @@ setupGUI userInfo window = do
   poRequests <- mkChatArea incoming uberContainer
 
   -- DEBUG
-  register poRequests (\_ -> print "Never gonna see this")
 
   postmaster makeSock poRequests
 

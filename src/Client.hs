@@ -40,7 +40,8 @@ data ConvoState
   | Connecting (TMVar Socket)
 
 configPath :: IO FilePath
-configPath = (++ "/.pararc") <$> getHomeDirectory
+configPath = head <$> getArgs
+-- configPath = (++ "/.pararc") <$> getHomeDirectory
 
 readUserInfo :: String -> Maybe UserInfo
 readUserInfo = maybeRead
