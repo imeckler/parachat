@@ -55,7 +55,7 @@ instance Serialize ToClient where
 instance Serialize ToPeer where
 
 -- Delete me:
-serverName = "0.0.0.0"
+serverName = "www.izaakmeckler.com"
 serverPort = "8080"
 
 
