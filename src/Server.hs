@@ -38,6 +38,7 @@ main =
           print (Login user)
           sockAddrToAddr addr >>= 
             maybe (return ()) (atomically . addToDirectory user)
+
         GetAddr friend -> do
           putStrLn $ "getting the addr of " ++ friend
           atomically (readTVar directory) >>=
